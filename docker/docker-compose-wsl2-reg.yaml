@@ -1,0 +1,19 @@
+services:
+  benchmark:
+    image: intel/retail-benchmark:2026.0.0
+    container_name: metrics-collector
+    init: true
+    environment:
+      LC_ALL: C
+    volumes:
+      - ${log_dir}:/tmp/results
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        command -v sar
+        command -v free
+        sar 1 > /tmp/results/cpu_usage.log &
+        free -s 1 > /tmp/results/memory_usage.log &
+        wait -n
+        exit 1

@@ -186,7 +186,15 @@ def main():
         compose_files.append(os.path.abspath(file))
 
     # Determine which benchmark compose file to use
-    if my_args.benchmark_type == 'reg':
+    wsl2 = os.getenv('WSL2', 'false') == 'true'
+    if wsl2:
+        compose_name = (
+            'docker-compose-wsl2-reg.yaml'
+            if my_args.benchmark_type == 'reg' else 'docker-compose-wsl2.yaml'
+        )
+        benchmark_compose = os.path.abspath(os.path.join(
+            os.curdir, '..', 'docker', compose_name))
+    elif my_args.benchmark_type == 'reg':
         benchmark_compose = os.path.abspath(os.path.join(
             os.curdir, '..', 'docker', 'docker-compose-reg.yaml'))
     else:
@@ -197,6 +205,9 @@ def main():
     compose_files.append(benchmark_compose)
 
     env_vars = os.environ.copy()
+    if wsl2:
+        print('WSL2: collecting Linux-visible CPU/memory metrics only; '
+              'GPU/NPU utilization and hardware power metrics are unavailable.')
     env_vars["log_dir"] = results_dir
     env_vars["RESULTS_DIR"] = results_dir
     env_vars["DEVICE"] = my_args.target_device
@@ -276,6 +287,11 @@ def main():
 
     # collect metrics using copy-platform-metrics
     print("workloads finished...")
+    if wsl2 and os.path.abspath(my_args.parser_script) == os.path.abspath(
+            os.path.join(os.path.dirname(__file__), 'parse_qmassa_metrics_to_json.py')):
+        print('WSL2: skipping unsupported GPU telemetry parsing. '
+              f'CPU/memory samples and pipeline outputs are in {results_dir}.')
+        return
     # TODO: implement results handling based on what pipeline is run
     try:
         parser_string = ("python3 %s -d %s %s" % (my_args.parser_script, results_dir, my_args.parser_args))
