@@ -69,6 +69,7 @@ class WslBenchmarkTests(unittest.TestCase):
                         self.assertTrue(os.path.isfile(compose_files[-1]))
                         self.assertNotIn('BENCHMARK_IMAGE', env_vars)
                         self.assertEqual(env_vars['DEVICE'], device)
+                        self.assertTrue(os.path.isfile(env_vars['WSL_DISK_COLLECTOR']))
                         self.assertEqual(parser_calls, 0)
 
     def test_native_linux_keeps_collector_and_parser(self):

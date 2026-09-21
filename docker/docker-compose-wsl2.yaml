@@ -10,13 +10,16 @@ services:
       LC_ALL: C
     volumes:
       - ${log_dir}:/tmp/results
+      - ${WSL_DISK_COLLECTOR:?WSL_DISK_COLLECTOR must be set}:/scripts/collect_wsl_disk.py:ro
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
         set -e
         command -v sar
         command -v free
+        command -v python3
         sar 1 > /tmp/results/cpu_usage.log &
         free -s 1 > /tmp/results/memory_usage.log &
+        python3 /scripts/collect_wsl_disk.py &
         wait -n
         exit 1

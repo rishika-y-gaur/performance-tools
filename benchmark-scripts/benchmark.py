@@ -206,7 +206,9 @@ def main():
 
     env_vars = os.environ.copy()
     if wsl2:
-        print('WSL2: collecting Linux-visible CPU/memory metrics only; '
+        env_vars['WSL_DISK_COLLECTOR'] = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), '..', 'docker', 'scripts', 'collect_wsl_disk.py'))
+        print('WSL2: collecting Linux-visible CPU/memory and available disk I/O metrics; '
               'GPU/NPU utilization and hardware power metrics are unavailable.')
     env_vars["log_dir"] = results_dir
     env_vars["RESULTS_DIR"] = results_dir
@@ -290,7 +292,7 @@ def main():
     if wsl2 and os.path.abspath(my_args.parser_script) == os.path.abspath(
             os.path.join(os.path.dirname(__file__), 'parse_qmassa_metrics_to_json.py')):
         print('WSL2: skipping unsupported GPU telemetry parsing. '
-              f'CPU/memory samples and pipeline outputs are in {results_dir}.')
+              f'CPU/memory, disk I/O, collection_status.json and pipeline outputs are in {results_dir}.')
         return
     # TODO: implement results handling based on what pipeline is run
     try:
