@@ -17,7 +17,6 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     curl \
     cmake \
     python3-pip \
-    python3-psutil \
     build-essential \
     docker.io \
     pciutils \

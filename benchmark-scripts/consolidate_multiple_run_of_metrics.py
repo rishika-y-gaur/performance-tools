@@ -19,7 +19,6 @@ from natsort import natsorted
 from operator import add
 import json
 import csv
-import math
 
 # constants
 AVG_CPU_USAGE_CONSTANT = "CPU Utilization %"
@@ -548,10 +547,6 @@ class DiskBandwidthExtractor(KPIExtractor):
         disk_write_bytes_per_second = []
         disk_bandwidth_p = re.compile(self._DISK_BANDWIDTH_PATTERN)
         with open(log_file_path) as f:
-            first_line = f.readline()
-            if first_line.startswith('{') and json.loads(first_line).get('format') == 'wsl_disk_io_v1':
-                return self.extract_wsl_data(f)
-            f.seek(0)
             for line in f:
                 disk_bandwidth_m = disk_bandwidth_p.match(line)
                 if disk_bandwidth_m:
@@ -559,7 +554,7 @@ class DiskBandwidthExtractor(KPIExtractor):
                     unit_multiplier = 1 if 'B' in disk_bandwidth_m.group(self._READ_BYTES_UNITS_GROUP) else 1000
                     read_bytes_per_second = float(disk_bandwidth_m.group(self._READ_BYTES_PER_SECOND_GROUP)) * unit_multiplier
 
-                    unit_multiplier = 1 if 'B' in disk_bandwidth_m.group(self._WRITE_BYTES_UNITS_GROUP) else 1000
+                    unit_multiplier = 1 if 'B' in disk_bandwidth_m.group(self._WRITE_BYTES_PER_SECOND_GROUP) else 1000
                     write_bytes_per_second = float(disk_bandwidth_m.group(self._WRITE_BYTES_PER_SECOND_GROUP)) * unit_multiplier
 
                     disk_read_bytes_per_second.append(read_bytes_per_second)
@@ -570,33 +565,7 @@ class DiskBandwidthExtractor(KPIExtractor):
             return {AVG_DISK_READ_BANDWIDTH_CONSTANT: round(mean(disk_read_bytes_per_second) / megabytes_to_bytes, 2), 
                     AVG_DISK_WRITE_BANDWIDTH_CONSTANT: round(mean(disk_write_bytes_per_second) / megabytes_to_bytes, 2)}
         else:
-            return self.return_blank()
-
-    def extract_wsl_data(self, records):
-        read_bytes = 0
-        write_bytes = 0
-        duration = 0
-        for line in records:
-            try:
-                record = json.loads(line)
-                elapsed = float(record['elapsed_seconds'])
-                read_rate = float(record['read_bytes_per_second'])
-                write_rate = float(record['write_bytes_per_second'])
-                if elapsed <= 0 or min(read_rate, write_rate) < 0:
-                    continue
-                if not all(math.isfinite(value) for value in (elapsed, read_rate, write_rate)):
-                    continue
-            except (ValueError, KeyError, TypeError):
-                continue
-            read_bytes += read_rate * elapsed
-            write_bytes += write_rate * elapsed
-            duration += elapsed
-        if not duration:
-            return self.return_blank()
-        return {
-            AVG_DISK_READ_BANDWIDTH_CONSTANT: round(read_bytes / duration / 1000000, 2),
-            AVG_DISK_WRITE_BANDWIDTH_CONSTANT: round(write_bytes / duration / 1000000, 2),
-        }
+            {AVG_DISK_READ_BANDWIDTH_CONSTANT: "NA", AVG_DISK_WRITE_BANDWIDTH_CONSTANT: "NA"}
 
     def return_blank(self):
         return {AVG_DISK_READ_BANDWIDTH_CONSTANT: "NA", AVG_DISK_WRITE_BANDWIDTH_CONSTANT: "NA"}
@@ -870,24 +839,6 @@ class PCMExtractor(KPIExtractor):
     def return_blank(self):
         return {AVG_POWER_USAGE_CONSTANT: "-", AVG_MEM_BANDWIDTH_CONSTANT: "-"}
 
-class WslCollectionStatusExtractor(KPIExtractor):
-    def extract_data(self, log_file_path):
-        with open(log_file_path) as status_file:
-            status = json.load(status_file)
-        metrics = {'Telemetry Scope': status['scope']}
-        for output, names in {
-            'pcm.csv': (AVG_POWER_USAGE_CONSTANT, AVG_MEM_BANDWIDTH_CONSTANT),
-            'npu_usage.csv': (AVG_NPU_USAGE_CONSTANT,),
-            'qmassa': (AVG_GPU_USAGE_CONSTANT,),
-        }.items():
-            if status.get(output, {}).get('status') == 'unavailable':
-                metrics.update({name: 'NA' for name in names})
-        return metrics
-
-    def return_blank(self):
-        return {}
-
-
 KPIExtractor_OPTION = {"meta_summary.txt":MetaExtractor,
                        "camera":FPSExtractor,
                        "pipeline":PIPELINEFPSExtractor,
@@ -904,8 +855,7 @@ KPIExtractor_OPTION = {"meta_summary.txt":MetaExtractor,
                        r"^qmassa.*parsed.*\.json$": QMASSAGPUUsageExtractor,
                        r"^vlm_application_metrics.*\.txt$": VLMAppMetricsExtractor,
                        r"^vlm_performance_metrics.*\.txt$": VLMPerformanceMetricsExtractor,
-                       r"^(?:swlp|poi)_stream_density.*\.json$": StreamDensityExtractor,
-                       r"^collection_status\.json$": WslCollectionStatusExtractor}
+                       r"^(?:swlp|poi)_stream_density.*\.json$": StreamDensityExtractor}
 
 def add_parser():
     parser = argparse.ArgumentParser(description='Consolidate data')
