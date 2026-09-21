@@ -17,6 +17,32 @@ import windows_metrics
 
 
 class WindowsMetricsTesting(unittest.TestCase):
+    def test_python_discovery_launcher_fallback(self):
+        windows_path = r'C:\Users\intel\AppData\Local\Programs\Python\Python311\python.exe'
+        linux_path = '/mnt/c/Users/intel/AppData/Local/Programs/Python/Python311/python.exe'
+        with mock.patch.object(windows_metrics.subprocess, 'check_output', side_effect=[
+                subprocess.CalledProcessError(9009, 'python.exe'),
+                json.dumps(windows_path), linux_path, json.dumps(windows_path)]) as probe:
+            self.assertEqual(windows_metrics.resolve_windows_python({}), linux_path)
+        self.assertEqual(probe.call_args_list[1].args[0][:2], ['py.exe', '-3.11'])
+        self.assertEqual(probe.call_args_list[-1].args[0][0], linux_path)
+
+    def test_python_discovery_explicit_path_with_spaces(self):
+        executable = '/mnt/c/Program Files/Python311/python.exe'
+        with mock.patch.object(windows_metrics.subprocess, 'check_output',
+                               return_value=json.dumps(executable)) as probe:
+            self.assertEqual(windows_metrics.resolve_windows_python(
+                {'WINDOWS_PYTHON': executable}), executable)
+            self.assertEqual(probe.call_args_list[0].args[0][0], executable)
+
+    def test_python_discovery_failure_and_override(self):
+        for env, count in (({}, 3), ({'WINDOWS_PYTHON': '/missing/python.exe'}, 1)):
+            with mock.patch.object(windows_metrics.subprocess, 'check_output',
+                                   side_effect=FileNotFoundError()) as probe:
+                with self.assertRaisesRegex(ValueError, 'No working Windows Python'):
+                    windows_metrics.resolve_windows_python(env)
+                self.assertEqual(probe.call_count, count)
+
     def test_gpu_power_rejects_cpu_and_preserves_missing_values(self):
         reader = windows_metrics.GpuPowerReader.__new__(windows_metrics.GpuPowerReader)
         sensor = SimpleNamespace(SensorType='Power', Value=None,
