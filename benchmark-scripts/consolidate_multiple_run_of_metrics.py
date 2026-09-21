@@ -19,6 +19,7 @@ from natsort import natsorted
 from operator import add
 import json
 import csv
+from numbers import Real
 import windows_metrics
 
 # constants
@@ -867,6 +868,15 @@ KPIExtractor_OPTION = {"meta_summary.txt":MetaExtractor,
                        r"^vlm_performance_metrics.*\.txt$": VLMPerformanceMetricsExtractor,
                        r"^(?:swlp|poi)_stream_density.*\.json$": StreamDensityExtractor}
 
+def format_metric_value(value):
+    if value is None or (isinstance(value, str) and value in ("NA", "N/A", "-", "")):
+        return "0.00"
+    if isinstance(value, Real) and not isinstance(value, bool):
+        if value == 0 or not np.isfinite(value):
+            return "0.00"
+    return value
+
+
 def add_parser():
     parser = argparse.ArgumentParser(description='Consolidate data')
     parser.add_argument('--root_directory', nargs=1, help='Root directory that consists all log directory that store log file', required=True)
@@ -882,7 +892,11 @@ if __name__ == '__main__':
 
     n = 0
     df = pd.DataFrame()
-    full_kpi_dict = {}
+    full_kpi_dict = dict.fromkeys((
+        AVG_CPU_USAGE_CONSTANT, AVG_NPU_USAGE_CONSTANT, AVG_MEM_USAGE_CONSTANT,
+        AVG_DISK_READ_BANDWIDTH_CONSTANT, AVG_DISK_WRITE_BANDWIDTH_CONSTANT,
+        f"S0 {AVG_MEM_BANDWIDTH_CONSTANT}", f"S0 {AVG_POWER_USAGE_CONSTANT}",
+        "Overall Latency (ms)"), 0.00)
     all_channel_medians = []  # Collect all channel medians from all files
     linux_hardware_extractors = (CPUUsageExtractor, NPUUsageExtractor, MemUsageExtractor,
                                  MemBandwidthExtractor, DiskBandwidthExtractor,
@@ -929,7 +943,7 @@ if __name__ == '__main__':
         for key, value in full_kpi_dict.items():
             if isinstance(value, dict):
                 # Format dictionary values without curly braces
-                formatted_value = ', '.join([f'{k}: {v}' for k, v in value.items()])
+                formatted_value = ', '.join([f'{k}: {format_metric_value(v)}' for k, v in value.items()])
                 writer.writerow([key, formatted_value])
             else:
-                writer.writerow([key, value])
+                writer.writerow([key, format_metric_value(value)])
