@@ -869,6 +869,7 @@ if __name__ == '__main__':
 
     root_directory = args['root_directory'][0]
     output = args['output'][0]
+    wsl2 = os.environ.get('WSL2', '').lower() == 'true'
 
     n = 0
     df = pd.DataFrame()
@@ -876,6 +877,8 @@ if __name__ == '__main__':
     all_channel_medians = []  # Collect all channel medians from all files
     
     for kpiExtractor in KPIExtractor_OPTION:
+        if wsl2 and kpiExtractor == 'npu_usage.csv':
+            continue
         fileFound = False
         for dirpath, dirname, filename in os.walk(root_directory):
             for file in filename:
@@ -900,6 +903,9 @@ if __name__ == '__main__':
         
         full_kpi_dict["Overall Latency (ms)"] = round(overall_median, 3)
        
+    if wsl2:
+        full_kpi_dict[AVG_NPU_USAGE_CONSTANT] = '0.00'
+
     # Write out summary csv file from dictionary
     with open(output, 'w') as csv_file:
         writer = csv.writer(csv_file)
