@@ -13,6 +13,7 @@ import traceback
 import csv
 import json
 import stream_density
+import windows_metrics
 from device_validation import validate_target_device, resolve_target_device_default
 
 
@@ -194,7 +195,8 @@ def main():
             os.curdir, '..', 'docker', 'docker-compose.yaml'))
     
     # Replace the hardcoded compose file addition
-    compose_files.append(benchmark_compose)
+    if not windows_metrics.enabled():
+        compose_files.append(benchmark_compose)
 
     env_vars = os.environ.copy()
     env_vars["log_dir"] = results_dir
@@ -203,6 +205,9 @@ def main():
     retail_use_case_root = os.path.abspath(my_args.retail_use_case_root)
     env_vars["RETAIL_USE_CASE_ROOT"] = retail_use_case_root
     env_vars["VLM_WORKLOAD_ENABLED"] = str(os.getenv("LP_VLM_WORKLOAD_ENABLED"))
+    if windows_metrics.enabled(env_vars):
+        windows_metrics.preflight(env_vars)
+        windows_metrics.reset(results_dir)
     if my_args.density_increment:
         env_vars["PIPELINE_INC"] = str(my_args.density_increment)
     if len(target_fps_list) > 1 and container_names_list:
@@ -244,35 +249,26 @@ def main():
         docker_compose_containers("up", compose_files=compose_files,
                                   compose_post_args="-d",
                                   env_vars=env_vars)
-        print("Waiting for %ds init duration to complete" % my_args.init_duration)
-        time.sleep(my_args.init_duration)
+        try:
+            print("Waiting for %ds init duration to complete" % my_args.init_duration)
+            time.sleep(my_args.init_duration)
+            print("Waiting for %ds for workload to finish" % my_args.duration)
+            with windows_metrics.measure(env_vars):
+                time.sleep(my_args.duration)
 
-        # use duration to sleep
-        print(
-            "Waiting for %ds for workload to finish"
-            % my_args.duration)
-        time.sleep(my_args.duration)
-        
-        # grab the container logs if necessary
-        if my_args.docker_log:
-            try:
-                docker_log = ("docker logs %s" % my_args.docker_log)
-                docker_log_args = shlex.split(docker_log)
-                log_file = os.path.join(my_args.results_dir, "%s.log" % my_args.docker_log)    
-                print("writing docker log to %s" % log_file)
-                with open(log_file, 'wb') as f:
-                    subprocess.run(docker_log_args,
-                                   stdout=f,
-                                   stderr=subprocess.STDOUT,
-                                   check=True, env=env_vars)  # nosec B404, B603
-            
-            except subprocess.CalledProcessError:
-                print("Exception getting the docker log %s: %s" %
-                    (my_args.docker_log, traceback.format_exc()))        
-        
-        # stop all containers and camera-simulator
-        docker_compose_containers("down", compose_files=compose_files,
-                                  env_vars=env_vars)
+            if my_args.docker_log:
+                try:
+                    docker_log_args = ["docker", "logs", my_args.docker_log]
+                    log_file = os.path.join(my_args.results_dir, "%s.log" % my_args.docker_log)
+                    print("writing docker log to %s" % log_file)
+                    with open(log_file, 'wb') as output:
+                        subprocess.run(docker_log_args, stdout=output,
+                                       stderr=subprocess.STDOUT, check=True, env=env_vars)
+                except subprocess.CalledProcessError:
+                    print("Exception getting the docker log %s: %s" %
+                          (my_args.docker_log, traceback.format_exc()))
+        finally:
+            docker_compose_containers("down", compose_files=compose_files, env_vars=env_vars)
 
     # collect metrics using copy-platform-metrics
     print("workloads finished...")
@@ -282,8 +278,9 @@ def main():
         # print("======DEBUG======: %s" % parser_string)
         parser_args = shlex.split(parser_string)
 
-        subprocess.run(parser_args,
-                       check=True, env=env_vars)  # nosec B404, B603
+        if not windows_metrics.enabled(env_vars):
+            subprocess.run(parser_args,
+                           check=True, env=env_vars)  # nosec B404, B603
     except subprocess.CalledProcessError:
         print("Exception calling %s\n parser %s: %s" %
               (parser_string, my_args.parser_script, traceback.format_exc()))

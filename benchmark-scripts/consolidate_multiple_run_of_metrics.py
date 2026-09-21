@@ -19,6 +19,7 @@ from natsort import natsorted
 from operator import add
 import json
 import csv
+import windows_metrics
 
 # constants
 AVG_CPU_USAGE_CONSTANT = "CPU Utilization %"
@@ -839,6 +840,14 @@ class PCMExtractor(KPIExtractor):
     def return_blank(self):
         return {AVG_POWER_USAGE_CONSTANT: "-", AVG_MEM_BANDWIDTH_CONSTANT: "-"}
 
+class WindowsMetricsExtractor(KPIExtractor):
+    def extract_data(self, log_file_path):
+        return windows_metrics.summary(os.path.dirname(log_file_path))
+
+    def return_blank(self):
+        return {"Windows Collection Status": "NA"}
+
+
 KPIExtractor_OPTION = {"meta_summary.txt":MetaExtractor,
                        "camera":FPSExtractor,
                        "pipeline":PIPELINEFPSExtractor,
@@ -853,6 +862,7 @@ KPIExtractor_OPTION = {"meta_summary.txt":MetaExtractor,
                        "pcm.csv":PCMExtractor,
                        r"(?:^xpum).*\.json$": XPUMUsageExtractor,
                        r"^qmassa.*parsed.*\.json$": QMASSAGPUUsageExtractor,
+                       r"^windows_metrics\.json$": WindowsMetricsExtractor,
                        r"^vlm_application_metrics.*\.txt$": VLMAppMetricsExtractor,
                        r"^vlm_performance_metrics.*\.txt$": VLMPerformanceMetricsExtractor,
                        r"^(?:swlp|poi)_stream_density.*\.json$": StreamDensityExtractor}
@@ -874,12 +884,25 @@ if __name__ == '__main__':
     df = pd.DataFrame()
     full_kpi_dict = {}
     all_channel_medians = []  # Collect all channel medians from all files
+    linux_hardware_extractors = (CPUUsageExtractor, NPUUsageExtractor, MemUsageExtractor,
+                                 MemBandwidthExtractor, DiskBandwidthExtractor,
+                                 PowerUsageExtractor, PCMExtractor, XPUMUsageExtractor,
+                                 QMASSAGPUUsageExtractor)
+    if windows_metrics.reporting_enabled(root_directory):
+        full_kpi_dict.update(windows_metrics.summary(root_directory))
     
     for kpiExtractor in KPIExtractor_OPTION:
         fileFound = False
         for dirpath, dirname, filename in os.walk(root_directory):
             for file in filename:
                 if re.search(kpiExtractor, file):
+                    extractor_type = KPIExtractor_OPTION[kpiExtractor]
+                    windows_report = (windows_metrics.reporting_enabled(root_directory)
+                                      or windows_metrics.reporting_enabled(dirpath))
+                    if windows_report and extractor_type in linux_hardware_extractors:
+                        continue
+                    if extractor_type is WindowsMetricsExtractor and not windows_report:
+                        continue
                     fileFound = True
                     extractor = KPIExtractor_OPTION.get(kpiExtractor)()
                     kpi_dict = extractor.extract_data(

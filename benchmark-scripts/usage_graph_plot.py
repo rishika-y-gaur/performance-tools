@@ -5,6 +5,7 @@ import os
 import subprocess
 import argparse
 import glob
+import windows_metrics
 
 MAX_POINTS = 180
 
@@ -166,12 +167,66 @@ def plot_memory_usage(ax, filepath):
         ax.text(0.5, 0.5, "No Memory data", ha='center', va='center', fontsize=12)
         ax.axis('off')
 
+def plot_windows_metrics(root):
+    captures = list(windows_metrics.selected_samples(root))
+    if not captures:
+        figure, axis = plt.subplots(figsize=(12, 4))
+        axis.text(0.5, 0.5, 'Windows host metrics unavailable: no complete selected capture',
+                  ha='center', va='center')
+        axis.axis('off')
+    else:
+        figure, axes = plt.subplots(len(captures) * 4, 1, figsize=(16, len(captures) * 14), squeeze=False)
+        for capture_index, (capture, samples) in enumerate(captures):
+            values = windows_metrics.series(samples)
+            timestamps = [sample['timestamp'] - samples[0]['timestamp'] for sample in samples]
+            groups = [('CPU', ['CPU Utilization (%)'], '%'),
+                      ('Memory', ['Memory Usage (%)'], '%'),
+                      ('Disk', ['Disk Read (MiB/s)', 'Disk Write (MiB/s)'], 'MiB/s'),
+                      ('GPU engines', [label for label in values if label.startswith('GPU ')], '%')]
+            for group_index, (title, labels, unit) in enumerate(groups):
+                axis = axes[capture_index * 4 + group_index][0]
+                plotted = False
+                for label in labels:
+                    measurements = values[label]
+                    if any(windows_metrics.numeric(value) for value in measurements):
+                        axis.plot(timestamps, [value if windows_metrics.numeric(value) else float('nan')
+                                              for value in measurements], label=label)
+                        plotted = True
+                axis.set_title(f"Windows host {title}: {capture['scenario']} (pipelines={capture['pipeline_count']})")
+                if plotted:
+                    axis.set_xlabel('Elapsed time (seconds)')
+                    axis.set_ylabel(unit)
+                    axis.set_ylim(bottom=0, top=105 if unit == '%' else None)
+                    axis.grid(True)
+                    axis.legend(fontsize=8)
+                else:
+                    axis.text(0.5, 0.5, 'Unavailable', ha='center', va='center', transform=axis.transAxes)
+                    axis.axis('off')
+    figure.tight_layout()
+    output_image = os.path.join(root, 'plot_metrics.png')
+    figure.savefig(output_image, dpi=150)
+    plt.close(figure)
+    return output_image
+
+
+def open_plot(output_image):
+    try:
+        subprocess.run(['xdg-open', output_image], check=True)
+    except (OSError, subprocess.CalledProcessError) as error:
+        print(f"Plot saved; unable to open viewer: {error}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate single consolidated plot for CPU, NPU, and all GPU usage.")
     parser.add_argument('--dir', type=str, default='.', help='Root directory containing logs')
     args = parser.parse_args()
 
     root = os.path.abspath(args.dir)
+    if windows_metrics.reporting_enabled(root):
+        output_image = plot_windows_metrics(root)
+        print(f"Saved: {output_image}")
+        open_plot(output_image)
+        return
     cpu_log = os.path.join(root, 'cpu_usage.log')
     npu_csv = os.path.join(root, 'npu_usage.csv')
     gpu_files = sorted(glob.glob(os.path.join(root, 'qmassa*parsed.json')))
@@ -204,7 +259,7 @@ def main():
     plt.savefig(output_image, dpi=300)
     plt.close()
 
-    subprocess.run(["xdg-open", output_image])
+    open_plot(output_image)
     print(f"✅ Saved: {output_image}")
 
 if __name__ == '__main__':

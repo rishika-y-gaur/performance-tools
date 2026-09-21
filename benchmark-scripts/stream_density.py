@@ -8,6 +8,7 @@ import os
 import subprocess
 import time
 import benchmark
+import windows_metrics
 import glob
 import sys
 import re
@@ -728,8 +729,11 @@ def run_pipeline_iterations(
         # once we have all non-empty pipeline log files
         # we then can calculate the average fps
         # --- Calculate FPS and latency metrics ---
-        total_fps, min_p90_across_streams, stream_fps_dict = calculate_multi_stream_fps(
-            num_pipelines, results_dir, container_name, env_vars)
+        with windows_metrics.measure(env_vars, f"{container_name}, target_fps={target_fps}"):
+            total_fps, min_p90_across_streams, stream_fps_dict = calculate_multi_stream_fps(
+                num_pipelines, results_dir, container_name, env_vars)
+            total_pipeline_latency, total_pipeline_latency_per_stream = calculate_pipeline_latency(
+                num_pipelines, results_dir, container_name)
 
         print('container name:', container_name)
         print('Total FPS:', total_fps)
@@ -739,8 +743,6 @@ def run_pipeline_iterations(
         print(f"Averaged FPS per stream (mean p90): {avg_p90_per_stream} "
               f"for {num_pipelines} pipeline(s)")
         
-        total_pipeline_latency, total_pipeline_latency_per_stream = calculate_pipeline_latency(
-            num_pipelines, results_dir, container_name)
         print(f"Total Pipeline Latency: {total_pipeline_latency} "
         f"for {num_pipelines} pipeline(s)")
         print(f"Total Pipeline Latency per stream: "
@@ -967,6 +969,8 @@ def run_stream_density(env_vars, compose_files, target_fps_list,
                         env_vars, compose_files, results_dir,
                         container_name, target_fps
                     )
+                    windows_metrics.select_iteration(
+                        env_vars, f"{container_name}, target_fps={target_fps}", num_pipelines)
                     results.append(
                         (
                             target_fps,
