@@ -17,31 +17,32 @@ import windows_metrics
 
 
 class WindowsMetricsTesting(unittest.TestCase):
-    def test_python_discovery_launcher_fallback(self):
-        windows_path = r'C:\Users\intel\AppData\Local\Programs\Python\Python311\python.exe'
-        linux_path = '/mnt/c/Users/intel/AppData/Local/Programs/Python/Python311/python.exe'
-        with mock.patch.object(windows_metrics.subprocess, 'check_output', side_effect=[
-                subprocess.CalledProcessError(9009, 'python.exe'),
-                json.dumps(windows_path), linux_path, json.dumps(windows_path)]) as probe:
-            self.assertEqual(windows_metrics.resolve_windows_python({}), linux_path)
-        self.assertEqual(probe.call_args_list[1].args[0][:2], ['py.exe', '-3.11'])
-        self.assertEqual(probe.call_args_list[-1].args[0][0], linux_path)
-
-    def test_python_discovery_explicit_path_with_spaces(self):
+    def test_configured_python_path_with_spaces(self):
         executable = '/mnt/c/Program Files/Python311/python.exe'
-        with mock.patch.object(windows_metrics.subprocess, 'check_output',
-                               return_value=json.dumps(executable)) as probe:
-            self.assertEqual(windows_metrics.resolve_windows_python(
-                {'WINDOWS_PYTHON': executable}), executable)
-            self.assertEqual(probe.call_args_list[0].args[0][0], executable)
+        collector = windows_metrics.WindowsMetricsCollector()
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(windows_metrics.subprocess, 'check_output',
+                                  side_effect=['C:\\helper.py', 'C:\\results']) as paths, \
+                mock.patch.object(windows_metrics.subprocess, 'Popen') as launch:
+            launch.return_value.returncode = 0
+            collector.start({'WSL2': 'true', 'RESULTS_DIR': directory,
+                             'WINDOWS_PYTHON': executable})
+            self.assertEqual(launch.call_args.args[0][0], executable)
+            self.assertEqual(paths.call_count, 2)
+            collector.stop()
 
-    def test_python_discovery_failure_and_override(self):
-        for env, count in (({}, 3), ({'WINDOWS_PYTHON': '/missing/python.exe'}, 1)):
-            with mock.patch.object(windows_metrics.subprocess, 'check_output',
-                                   side_effect=FileNotFoundError()) as probe:
-                with self.assertRaisesRegex(ValueError, 'No working Windows Python'):
-                    windows_metrics.resolve_windows_python(env)
-                self.assertEqual(probe.call_count, count)
+    def test_configured_python_failure_does_not_try_fallback(self):
+        collector = windows_metrics.WindowsMetricsCollector()
+        with tempfile.TemporaryDirectory() as directory, \
+                mock.patch.object(windows_metrics.subprocess, 'check_output',
+                                  side_effect=['C:\\helper.py', 'C:\\results']) as paths, \
+                mock.patch.object(windows_metrics.subprocess, 'Popen',
+                                  side_effect=FileNotFoundError()) as launch:
+            collector.start({'WSL2': 'true', 'RESULTS_DIR': directory,
+                             'WINDOWS_PYTHON': '/missing/python.exe'})
+            launch.assert_called_once()
+            self.assertEqual(paths.call_count, 2)
+            self.assertIsNone(collector.process)
 
     def test_gpu_power_rejects_cpu_and_preserves_missing_values(self):
         reader = windows_metrics.GpuPowerReader.__new__(windows_metrics.GpuPowerReader)

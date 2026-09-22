@@ -257,42 +257,6 @@ def collect(directory, stop, init_duration=0, pcm_exe=None,
         temporary.replace(directory / 'windows_metrics.json')
 
 
-def resolve_windows_python(env_vars):
-    override = env_vars.get('WINDOWS_PYTHON', '').strip()
-    probe = 'import json, os, sys; assert os.name == "nt"; print(json.dumps(sys.executable))'
-
-    def linux_path(path):
-        if re.match(r'^[A-Za-z]:[\\/]', path) or path.startswith('\\\\'):
-            return subprocess.check_output(
-                ['wslpath', '-u', path], env=env_vars, text=True,
-                stderr=subprocess.PIPE, timeout=10).strip()
-        return path
-
-    candidates = [[override]] if override else [
-        ['python.exe'], ['py.exe', '-3.11'], ['py.exe', '-3']]
-    for candidate in candidates:
-        try:
-            command = [linux_path(candidate[0]), *candidate[1:]]
-            result = subprocess.check_output(
-                [*command, '-c', probe], env=env_vars, text=True,
-                stderr=subprocess.PIPE, timeout=15)
-            executable = json.loads(result.strip())
-            if not isinstance(executable, str) or not executable:
-                raise ValueError('Windows Python returned no executable path')
-            executable = linux_path(executable)
-            subprocess.check_output(
-                [executable, '-c', probe], env=env_vars, text=True,
-                stderr=subprocess.PIPE, timeout=15)
-            return executable
-        except (OSError, subprocess.SubprocessError, ValueError):
-            continue
-    raise ValueError(
-        'No working Windows Python found. Install Windows Python with the py.exe launcher, '
-        'or set WINDOWS_PYTHON to its executable path (for example '
-        '/mnt/c/Users/intel/AppData/Local/Programs/Python/Python311/python.exe). '
-        'The Microsoft Store placeholder is not a Python installation.')
-
-
 class WindowsMetricsCollector:
     def __init__(self):
         self.process = None
@@ -313,7 +277,9 @@ class WindowsMetricsCollector:
             for path in (Path(__file__).resolve(), directory):
                 paths.append(subprocess.check_output(
                     ['wslpath', '-w', str(path)], text=True, timeout=5).strip())
-            executable = resolve_windows_python(env_vars)
+            executable = env_vars.get('WINDOWS_PYTHON', 'python.exe').strip()
+            if not executable:
+                raise ValueError('WINDOWS_PYTHON must name a Windows Python executable')
             command = [executable, '-u',
                        paths[0], '--output-dir', paths[1]]
             if env_vars.get('WINDOWS_PCM_EXE'):
@@ -356,10 +322,7 @@ collector = WindowsMetricsCollector()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    setup = parser.add_mutually_exclusive_group()
-    setup.add_argument('--resolve-python', action='store_true')
-    setup.add_argument('--install-dependencies', action='store_true')
-    parser.add_argument('--output-dir')
+    parser.add_argument('--output-dir', required=True)
     parser.add_argument('--init-duration', type=float, default=0)
     parser.add_argument('--pcm-exe')
     parser.add_argument('--lhm-dll')
@@ -367,19 +330,6 @@ if __name__ == '__main__':
     parser.add_argument('--gpu-power-adapter')
     parser.add_argument('--list-gpu-power-sensors', action='store_true')
     args = parser.parse_args()
-    if args.resolve_python or args.install_dependencies:
-        if os.name == 'nt' or os.environ.get('WSL2', '').lower() != 'true':
-            parser.error('Windows Python discovery must be invoked from WSL with WSL2=true')
-        try:
-            executable = resolve_windows_python(os.environ.copy())
-            print(executable, flush=True)
-            if args.install_dependencies:
-                subprocess.run([executable, '-m', 'pip', 'install', 'psutil', 'pywin32'], check=True)
-        except (OSError, subprocess.SubprocessError, ValueError) as error:
-            parser.exit(1, f'ERROR: {error}\n')
-        sys.exit(0)
-    if not args.output_dir:
-        parser.error('--output-dir is required for collection or sensor discovery')
     if os.name != 'nt':
         parser.error('This worker must run under Windows Python, launched by the WSL benchmark')
     if args.list_gpu_power_sensors:
