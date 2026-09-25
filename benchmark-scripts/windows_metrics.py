@@ -37,6 +37,7 @@ class GpuPowerReader:
         clr.AddReference(str(library))
         from LibreHardwareMonitor.Hardware import Computer
         self.computer = Computer()
+        self.computer.IsCpuEnabled = True
         self.computer.IsGpuEnabled = True
         try:
             self.computer.Open()
